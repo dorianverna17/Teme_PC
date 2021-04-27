@@ -1,0 +1,214 @@
+#include <queue.h>
+#include "skel.h"
+
+#define BUFF 100
+
+// structure for routing table
+typedef struct rtable_entry {
+	uint32_t prefix;
+	uint32_t next_hop;
+	uint32_t mask;
+	int interface;
+} entry;
+
+typedef struct arp_table_entry {
+	uint32_t ip_address;
+	uint8_t mac_address[ETH_ALEN];
+} arp_entry;
+
+//function to parse the routing table
+entry* parse_routing_table(char* filename, int *n) {
+	char buffer[100];
+	FILE* file = fopen(filename, "r");
+	char delim[2] = " ";
+	int nr = 0, size = 10;
+	entry *vector = malloc(size * sizeof(struct rtable_entry)), *e;
+
+	if (file) {
+		char *p;
+		while (fgets(buffer, sizeof(char) * BUFF, file)) {
+			if (nr >= size) {
+				size *= 3;
+				vector = realloc(vector, size * sizeof(struct rtable_entry));
+			}
+			p = strtok(buffer, delim);
+			e = malloc(sizeof(struct rtable_entry));
+			
+			// prefixul
+			e->prefix = inet_addr(p);
+			p = strtok(NULL, delim);
+			
+			// next_hop
+			e->next_hop = inet_addr(p);
+			p = strtok(NULL, delim);
+
+			// mask
+			e->mask = inet_addr(p);
+			p = strtok(NULL, delim);
+
+			// interface
+			e->interface = atoi(p);
+
+			// put in the vector of entries
+			vector[nr] = *e;
+			nr++;
+		}
+	}
+	fclose(file);
+	*n = nr;
+	return vector;
+}
+
+uint8_t* find(arp_entry* arp_table, uint32_t ip_address, int size) {
+	for (int i = 0; i < size; i++) {
+		if (ip_address == arp_table[i].ip_address)
+			return arp_table[i].mac_address;
+	}
+	return NULL;
+}
+
+int get_interface_router(struct iphdr* ip) {
+	for (int i = 0; i < ROUTER_NUM_INTERFACES; i++) {
+		if (inet_addr(get_interface_ip(i)) == ip->daddr)
+			return i;
+	}
+	return -1;
+}
+
+int find_best_route(uint32_t destination, entry* rtable, int size,
+	uint32_t* next_hop, int* interface) {
+	for (int i = 0; i < size; i++) {
+		if ((destination & rtable[i].mask) == rtable[i].prefix) {
+			*next_hop = rtable[i].next_hop;
+			*interface = rtable[i].interface;
+			return 1;
+		}
+	}
+	return 0;
+}
+
+uint8_t* find_mac_arp(arp_entry* arp_table, uint32_t address, int size) {
+	for (int i = 0; i < size; i++) {
+		if (arp_table[i].ip_address == address) {
+			return arp_table[i].mac_address;
+		}
+	}
+	return NULL;
+}
+
+int main(int argc, char *argv[])
+{
+	packet m;
+	int rc;
+
+	init(argc - 2, argv + 2);
+
+	// size of the vector of entries
+	int size = 0;
+	entry *rtable = parse_routing_table(argv[1], &size);
+
+	// arp_table;
+	int size_arp = 0, arp_capacity = 10;
+	arp_entry *arp_table = malloc(sizeof(arp_entry) * arp_capacity);
+
+	// populate arp_table
+	arp_table[0].ip_address = inet_addr("192.168.0.2");
+	hwaddr_aton("de:ad:be:ef:00:00", arp_table[0].mac_address);
+	arp_table[1].ip_address = inet_addr("192.168.1.2");
+	hwaddr_aton("de:ad:be:ef:00:01", arp_table[1].mac_address);
+	arp_table[2].ip_address = inet_addr("192.168.2.2");
+	hwaddr_aton("de:ad:be:ef:00:02", arp_table[2].mac_address);
+	arp_table[3].ip_address = inet_addr("192.168.3.2");
+	hwaddr_aton("de:ad:be:ef:00:03", arp_table[3].mac_address);
+	arp_table[4].ip_address = inet_addr("192.0.1.1");
+	hwaddr_aton("ca:fe:ba:be:00:01", arp_table[4].mac_address);
+	arp_table[5].ip_address = inet_addr("192.0.1.2");
+	hwaddr_aton("ca:fe:ba:be:01:00", arp_table[5].mac_address);
+	size_arp = 6;
+
+	// space where I declare variable
+	int interface; // the source interface
+	// uint32_t ip_interface; // the ip of the source
+	uint8_t *mac_interface = malloc(6 * sizeof(uint8_t)); // the mac of the source
+
+	uint8_t *mac_address_destination;
+	uint32_t next_hop;
+	int interface_next_hop;
+
+	while (1) {
+		setvbuf(stdout, NULL, _IONBF, 0);
+		
+		rc = get_packet(&m);
+		DIE(rc < 0, "get_message");
+		/* Students will write code here */
+
+		// extracting the ip header from msg
+		struct iphdr *ip_hdr = (struct iphdr*) (m.payload + sizeof(struct ether_header));
+
+		// extracting the ether_header
+		struct ether_header *eth_hdr = (struct ether_header*) m.payload;
+
+		// extracting the arp header
+		struct arp_header* arp_hdr = parse_arp(m.payload);
+
+		// getting details about router
+		interface = get_interface_router(ip_hdr);
+		get_interface_mac(interface, mac_interface);
+
+		if (ip_hdr->ttl <= 1) {
+			send_icmp_error(ip_hdr->saddr, ip_hdr->daddr, eth_hdr->ether_dhost,
+			eth_hdr->ether_shost, ICMP_TIME_EXCEEDED, 0, m.interface);
+			continue;
+		}
+
+		// managing the icmp requests
+		// if icmp_package is NULL, then it is not an ICMP package
+		struct icmphdr* icmp_package = parse_icmp(m.payload);
+		if (interface != -1) {
+			if (icmp_package != NULL) {
+				// check if it is an ICMP ECHO request
+				// if it is, then send an ICMP ECHO REPLY
+				if (icmp_package->type == 8 && ip_hdr->ttl > 1) {
+					send_icmp(ip_hdr->saddr, ip_hdr->daddr, eth_hdr->ether_dhost,
+					eth_hdr->ether_shost, 0, 0, m.interface,
+					icmp_package->un.echo.id, icmp_package->un.echo.sequence);
+					continue;
+				}
+			}
+		}
+
+		// TODO - checking if it is an ARP Requests
+		if (arp_hdr != NULL) {
+			
+		}
+
+		// TODO - checking if it is an ARP Reply
+		if (arp_hdr != NULL) {
+
+		}
+
+		// now I verify the checksum - if it is 0, then I
+		// drop the package and continue receiving packages
+		if(ip_checksum(ip_hdr, sizeof(struct iphdr)) != 0) {
+			continue;
+		}
+		// decrementing the ttl
+		ip_hdr->ttl--;
+		// now I update the checksum
+		ip_hdr->check = 0;
+		// now to find the route to the desired host
+		if(!find_best_route(ip_hdr->daddr, rtable, size, &next_hop, &interface_next_hop)) {
+			send_icmp_error(ip_hdr->saddr, inet_addr(get_interface_ip(m.interface)),
+			eth_hdr->ether_dhost, mac_interface, ICMP_DEST_UNREACH, 0, m.interface);
+			continue;	
+		}
+		// changing the source and destination MACs
+		mac_address_destination = find_mac_arp(arp_table, next_hop, size_arp);
+		if (mac_address_destination != NULL) {
+			build_ethhdr(eth_hdr, mac_interface, mac_address_destination, htons(ETHERTYPE_IP));
+			// forwarding the packet
+        	ip_hdr->check = ip_checksum(ip_hdr, sizeof(struct iphdr));
+		}
+		send_packet(interface_next_hop, &m);
+	}
+}

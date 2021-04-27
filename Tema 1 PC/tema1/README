@@ -1,0 +1,69 @@
+Tema 1 PC
+Verna Dorian-Alexandru 324CC
+
+In implementare am incercat sa respect pasii dati in enuntul temei.
+Prima oara am facut parsarea rtable-ului intr-un vector de structuri,
+apoi am facut icmp-ul conform pasilor descrisi in enunt. Icmp-ul a
+fost destul de usor, mai ales ca stiam conceptul inca de la laborator.
+Apoi m-am apucat de forward, prima oara nu a fost chiar asa de complicat
+avand in vedere ca am memorat intr-un vector de structuri datele.
+La arp a fost mai greu, cel mai usor aici a fost sa trimit un REPLY atunci
+cand mi se trimite un request.
+
+La ARP Request a fost putin mai complicat, acolo mi-am facut un vector de
+structuri unde o structura este reprezentata de un camp uint32_t care
+reprezinta adresa ip pentru care corespund mesajele ce sunt in coada si
+un al doilea camp care reprezinta coada respectiva (practic pot spune ca
+am un vector de cozi, unde in coada retin mesajele - variabile de tip
+packet). Ideea este ca daca pentru un pachet de tip ip nu gasesc adresa mac
+destinatie (tabela arp nu contine intrarea dorita), atunci trimit ARP
+requestul si pun pachetul in coada. Cand primesc ARP reply-ul atunci scot
+din coada, updatez tabela ARP si incep procesul cu deque din coada.
+
+Dupa ce am facut ARP-ul am ales sa fac totul intr-o complexitate mai buna
+(cautarea in rtable pentru a obtine cea mai buna intrare). Din ce am inteles,
+se poate o complexitate buna folosind o trie si reprezentand adresele ip
+pe 32 de biti, fiecare nod din trie continand un camp value care poate lua
+ori valoarea 0 ori valoarea 1. Astfel, la cautarea in trie-ul meu se va merge
+prin maxim 32 de noduri (de fapt 33 pentru ca radacina nu contine o valoare -
+am gandit-o sa fie ceva de genul ca un nod santinela). Cautarea se face, astfel,
+in timp constant, asta este datorat faptului ca fiecare nod de trie contine si
+alte campuri, doua pentru left si right si inca doua pentru interface si
+next_hop. Procesul de populare al trie-ului consta in a face un "si" pe biti
+intre masca si prefix. numararea cator biti sunt relevanti pentru prefix si
+introducerea lor in trie, iar ultimul nod din acest sir relevant de biti va
+avea interface si next_hop setate cu valorile aferente din fisierele rtable.txt.
+Pentru a vedea cati biti sunt relevanti, ma duc de la dreapta la stanga prin masca
+atata timp cat gasesc biti de 0, dupa inseamna ca relevanti vor fi 32 - (acei biti
+numarati anterior). Acesti 32 - (acei biti numarati anterior) ii voi lua de la
+stanga la dreapta din masca & prefix.
+
+Probleme:
+- La vectorul de cozi am avut destul de multe erori, in general foarte multe
+seg faulturi. Posibil sa fi si ales o implementare mai grea.
+- O eroare mai era reprezentata si de faptul ca atunci cand puneam in coada,
+puneam efectiv pachetul m. Apoi mi-am facut o copie a acelui pachet si am pus-o in
+coada si a mers. Probabil ca aveam referinta in coada si eu o modificam dupa.
+- La trie am avut o problema. Din cate am inteles, inet_addr schimba formatul
+adresei ip in network byte order. Mie mi s-a parut putin ciudat sa lucrez asa,
+asa ca am decis sa reschimb ordinea octetilor si am facut-o folosid siftari.
+Cred ca puteam sa folosesc si functii precum htons sau ntohs dar pe moment
+uitasem de existenta lor si am facut totul manual.
+- Initial, inainte sa fac trie ma gandeam sa fac un hashtable, dar mi s-a spus
+de catre cineva din echipa care s-a ocupat de tema ca daca nu fac ceva cu
+complexitate logaritmica sau constanta, atunci nu o sa iau punctele aferente
+asa ca am decis sa fac trie.
+
+Codul contine comentarii unde mi s-a parut mie mai relevant, le-am facut in
+engleza din obisnuinta pentru ca asa faceam si la IOCLA (ni s-a spus sa ne
+obisnuim sa scriem cod si comentarii in engleza).
+
+Tema a fost ok, mie mi-a placut subiectul si consider ca am invatat destul de
+multe lucruri din ea, ca si recomandari, as sugera totusi sa fie putin mai
+bine explicata si documentatia sa fie mai la indemana putin, pentru ca pentru unii,
+atunci cand citesc prima oara tema, nici nu stiu cum si de unde sa o apuce.
+Ca si dificultate, din punctul meu de vedere, a fost o tema greuta, dar per
+total a fost worth it.
+Felicitari pentru tema si keep up the good work!
+
+Verna Dorian-Alexandru
