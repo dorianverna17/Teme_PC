@@ -10,6 +10,8 @@
 
 #include "helpers.h"
 
+// functie pentru initializare socket
+// am observat ca pt UDP nu merge asa ca o folosesc doar pentru TCP
 void initialize_socket(int *sockfd, struct sockaddr_in *serv_addr, int port, int family) {
 	int enable = 1, ret;
 
@@ -36,6 +38,10 @@ void initialize_socket(int *sockfd, struct sockaddr_in *serv_addr, int port, int
 	DIE(ret < 0, "bind");
 }
 
+// functie care imi parseaza un mesaj tcp de conectare
+// structura pentru un astfel de mesaj este diferita de cea
+// pentru un mesaj tcp pentru a trimite topicuri sau mesaje de
+// subscribe / unsubscribe
 tcp_connection_msg parse_tcp_connection_message(char *buffer) {
 	int id = 0, lenght_id, lenght_connection;
 	tcp_connection_msg msg;
@@ -54,6 +60,8 @@ tcp_connection_msg parse_tcp_connection_message(char *buffer) {
 	return msg;
 }
 
+// functie care imi parseaza mesajul primit de la udp intr-un buffer
+// si imi returneaza un udp_msg - structura definita de mine in helpers.h
 udp_msg parse_udp_message(char *buffer) {
 	udp_msg m;
 
@@ -77,6 +85,9 @@ udp_msg parse_udp_message(char *buffer) {
 	return m;
 }
 
+// aici formez un string din mesajul udp
+// asa cum mi se pare mie mai usor pentru a fi trimis catre
+// un client tcp
 char* udp_to_string(udp_msg m) {
 	char *buffer = malloc(BUFLEN * sizeof(char));
 	if (m.type == 0) {
@@ -124,26 +135,26 @@ char* udp_to_string(udp_msg m) {
 	return buffer;
 }
 
+// functie care imi trimite mesajul tcp catre clientii care
+// au dat subscribe la acel topic, daca clientul nu este conectat
+// si are sf-ul 1, atunci voi salva mesajul intr-o lista pentru
+// acel client si voi trimite mesajul cand se va conecta
 void send_tcp_messages(udp_msg msg, topic_table topics,
 	hashtable table, struct sockaddr_in ip, int port) {
 	topic_entry entry = find_topic_entry(topics, msg.topic);
 	if (entry == NULL)
 		return;
-	// printf("aici ajunge\n");
 	client_topic *clients = entry->clients;
 	int size = entry->size, n;
 	char *buffer = malloc(BUFLEN * sizeof(char));
 	strcpy(buffer, udp_to_string(msg));
 	tcp_msg *m;
-	// printf("si aici ajunge\n");
 	for (int i = 0; i < size; i++) {
-		// printf("%d\n", i);
 		if (!clients[i])
 			continue;
 		client_entry e = find_client_entry(clients[i]->id, table);
 		if (e == NULL)
 			continue;
-		// printf("aici poate da\n");
 		m = malloc(sizeof(tcp_msg));
 		strcpy(m->id, clients[i]->id);
 		strcpy(m->topic, msg.topic);
@@ -154,8 +165,18 @@ void send_tcp_messages(udp_msg msg, topic_table topics,
 		strcpy(m->value, buffer);
 		// Daca clientul este conectat, atunci trimit mesajul catre el
 		if (e->connected == 1) {
+			int sent = 0;
 			n = send(e->sockfd, m, sizeof(tcp_msg), 0);
-			DIE(n < 0, "send");
+			DIE(n < 0, "recv");
+			sent = sent + n;
+			while (sent < sizeof(tcp_msg)) {
+				n = send(e->sockfd, m + sent, sizeof(tcp_msg) - sent, 0);
+				DIE(n < 0, "recv");
+				if (n == 0)
+					break;
+				sent = sent + n;
+			}
+
 		// Daca clientul nu este conectat, dar sf-ul este 1, atunci
 		// pun mesajul in lista de mesaje care trebuie trimise clientului
 		// cand se va conecta
@@ -165,14 +186,26 @@ void send_tcp_messages(udp_msg msg, topic_table topics,
 	}	
 }
 
+// functia trimite mesajele pentru clientii cu sf-ul 1 care nu erau conectati
+// in acel moment
 hashtable send_remaining_messages(int sockfd, char *id, hashtable table) {
 	client_entry e = find_client_entry(id, table);
 	int n;
 	Node it = e->head;
 
 	while (it != NULL) {
+		int sent = 0;
 		n = send(sockfd, &(it->m), sizeof(tcp_msg), 0);
-		DIE(n < 0, "send");
+		DIE(n < 0, "recv");
+		sent = sent + n;
+		while (sent < sizeof(tcp_msg)) {
+			n = send(sockfd, &(it->m) + sent, sizeof(tcp_msg) - sent, 0);
+			DIE(n < 0, "recv");
+			if (n == 0)
+				break;
+			sent = sent + n;
+		}
+
 		it = it->next;
 	}
 	e->head = NULL;
@@ -257,7 +290,7 @@ int main(int argc, char *argv[]) {
 	// tabela pentru socketi
 	socket_table table_sock = initialize_socket_table();
 
-
+	// aici este implementata funtionalitatea serverului
 	while (1) {
 		tmp_fds = read_fds;
 		ret = select(fdmax + 1, &tmp_fds, NULL, NULL, NULL);
@@ -267,17 +300,12 @@ int main(int argc, char *argv[]) {
 		for (i = 0; i <= fdmax; i++) {
 			memset(buffer, 0, BUFLEN);
 			if (FD_ISSET(i, &tmp_fds)) {
+				// aici primesc un mesaj de exit
 				if (i == 0) {
 					fgets(buffer, BUFLEN, stdin);
-					if (strcmp(buffer, "exit\n") == 0) {
+					if (strcmp(buffer, "exit\n") == 0)
 						flag = 1;
-					} else if (strcmp(buffer, "print socket\n") == 0) {
-						print_sockets(table_sock);
-					} else if (strcmp(buffer, "print table\n") == 0) {
-
-					} else if (strcmp(buffer, "print topics\n") == 0) {
-						print_topics(topics);
-					}
+				// aici primesc un mesaj de la clientul UDP
 				} else if (i == sockfdUDP) {
 					socklen_t len = sizeof(serv_addr_udp);
 					memset(buffer, 0, BUFLEN);
@@ -289,6 +317,7 @@ int main(int argc, char *argv[]) {
 						send_tcp_messages(msg, topics, table,
 							serv_addr_udp, len);
 					}
+				// aici primesc un mesaj de pe socketul TCP
 				} else if (i == sockfdTCP) {
 					// cerere pe socketul cu listen
 					addr_size = sizeof(client_address);
@@ -312,7 +341,8 @@ int main(int argc, char *argv[]) {
 					tcp_connection_msg msg = parse_tcp_connection_message(buffer);
 					if (strcmp(msg.connection, "connect") == 0) {
 						int result;
-
+						// caut id-ul in tabela de socketi
+						// daca exista inseamna ca clientul este conectat
 						result = find_id_socket_table(msg.id, table_sock);
 						if (result) {
 							printf("Client %s already connected.\n", msg.id);
@@ -323,12 +353,17 @@ int main(int argc, char *argv[]) {
 							close(sockfd);
 							FD_CLR(sockfd, &read_fds);
 						} else {
+							// Daca nu atunci am de a face cu un client nou
 							printf("New client %s connected from %s:%d.\n",
 								msg.id, inet_ntoa(client_address.sin_addr),
 								ntohs(client_address.sin_port));
 							// adaugarea clientului in hashtable-ul cu clienti
 							result = add_socket(sockfd, msg.id, &table_sock);
 							result = add_client(&table, msg, sockfd);
+							// daca clientul nu a mers sa fie adaugat in tabela de clienti
+							// inseamna ca el s-a mai conectat inainte, caz in care doar
+							// trebuie sa setez connected = 1 si sa trimit mesajele care
+							// sunt de trimis daca sf == 1
 							if (result == 0) {
 								table = connect_client(table, msg.id, sockfd);
 								table = send_remaining_messages(sockfd, msg.id, table);
@@ -336,10 +371,26 @@ int main(int argc, char *argv[]) {
 						}
 					}
 				} else {
+					// aici primesc mesaje de la clientii TCP
 					memset(buffer, 0, BUFLEN);
 					tcp_msg *msg = malloc(sizeof(tcp_msg));
-					n = recv(i, msg, sizeof(tcp_msg), 0);
+
+					int size_received = sizeof(tcp_msg), received = 0, n;
+					n = recv(sockfd, msg, size_received, 0);
 					DIE(n < 0, "recv");
+					received = received + n;
+					if (n != 0) {
+						while (received < sizeof(tcp_msg)) {
+							n = recv(sockfd, msg + received, sizeof(tcp_msg) - received, 0);
+							DIE(n < 0, "recv");
+							if (n == 0)
+								break;
+							received = received + n;
+						}
+					}
+					// In cazul in care n este 0, atunci inseamna ca clientul
+					// a fost inchis si deci trebuie sa fac schimbarile necesare
+					// in tabele si sa inchid socketul lui
 					if (n == 0) {
 						close(i);
 						FD_CLR(i, &read_fds);
@@ -358,6 +409,9 @@ int main(int argc, char *argv[]) {
 							}
 							fdmax = j;
 						}
+						// daca este un mesaj de subscribe, atunci adaug topic-ul daca acesta
+						// nu exista inainte in tabela, apoi sa modific intrarea in tabela,
+						// adaugand clientul in lista celor care au dat subscribe pe acel topic
 					} else if (n > 0 && (*msg).type == 0) {
 						// Aici clientul da un mesaj cu subscribe
 						if (!isTopic(topics, (*msg).topic)) {
@@ -368,6 +422,7 @@ int main(int argc, char *argv[]) {
 						subscribe_client(&topics, (*message).topic, (*message).id, (*message).sf);
 					} else if (n > 0 && (*msg).type == 1) {
 						// Aici clientul da un mesaj cu unsubscribe
+						// modific tabela topics stergand din lista de abonati topicului acel client
 						topics = unsubscribe_client(topics, (*msg).topic, (*msg).id);
 					}
 				}
@@ -381,8 +436,18 @@ int main(int argc, char *argv[]) {
 					if (j != 0 && j != sockfdTCP && j != sockfdUDP) {
 						tcp_msg m;
 						m.type = 3;
+						// le trimit un mesaj de deconectare
+						int sent = 0;
 						n = send(j, &m, sizeof(tcp_msg), 0);
-						DIE(n < 0, "send");
+						DIE(n < 0, "recv");
+						sent = sent + n;
+						while (sent < sizeof(tcp_msg)) {
+							n = send(j, &m + sent, sizeof(tcp_msg) - sent, 0);
+							DIE(n < 0, "recv");
+							if (n == 0)
+								break;
+							sent = sent + n;
+						}
 					}
 					close(j);
 					FD_CLR(j, &read_fds);
@@ -391,7 +456,7 @@ int main(int argc, char *argv[]) {
 			break;
 		}
 	}
-
+	// la final inchid cei doi socketi
 	close(sockfdTCP);
 	close(sockfdUDP);
 

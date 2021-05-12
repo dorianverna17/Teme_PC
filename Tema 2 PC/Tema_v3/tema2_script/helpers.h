@@ -221,7 +221,7 @@ int hash(char *str) {
 	c = *str;
 	while (c != '\0') {
 		i++;
-		hash = ((hash << 5) + hash) + c; /* hash * 33 + c */
+		hash = ((hash << 5) + hash) + c;
 		c = str[i];
 	}
 	if (hash < 0)
@@ -229,6 +229,8 @@ int hash(char *str) {
 	return hash;
 }
 
+// aceste structuri le folosesc pentru o mai buna functionare
+// a tabelei de hash-uri
 typedef struct client_entry {
 	char id[11];
 	int port;
