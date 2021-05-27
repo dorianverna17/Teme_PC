@@ -1,0 +1,121 @@
+Verna Dorian-Alexandru
+Grupa 324CC
+Tema 3 PC
+
+Timp: 2 zile ~ 3-4 ore pe zi
+Dificultate: Destul de usoara, a compensat cu primele 2 teme
+care au fost grele
+
+Detalii de implementare:
+
+M-am folosit de fisierele requests.cpp, buffer.cpp si helpers.cpp
+precum si de aceleasi fisiere cu extensia h pe care le aveam de la lab
+pentru a realiza aceasta tema. In general, acestea au fost referinta
+mea, precum si scheletul si celelalte lucruri pe care le-am invatat
+la laboratorul 10. Asa cum am vazut pe forum, am inteles ca este ok
+sa ma folosesc de acestea.
+
+Codul este insotit de comentarii ajutatoare, sper ca este ok si se
+va intelege bine ce am dorit sa scriu in cod.
+
+Programul pentru client consta intr-un while in care tratez fiecare
+comanda pe care o citesc de la tastatura. Am incercat sa respect
+formatul dat in enuntul temei.
+
+Cat despre output, am ales sa nu printez tot raspunsul pe care il
+primesc pentru fiecare mesaj trimis, deoarece ar arata destul de urat
+si am decis sa fac programul putin mai user-friendly. Ideea este ca in
+general incerc sa parsez raspunsurile pe care le primesc si sa afisez
+mesaje ajutatoare atat pentru comenzile care sfarsesc prin succes cat si
+pentru cele care sfarsesc printr-o eroare.
+
+Pentru parsare am ales sa folosesc nlohmann pentru ca am auzit ca este
+usor de folosit si intr-adevar nu a fost foarte greu. A fost mai usor sa
+parsez folosind json decat sa interpretez mesajul doar ca pe un sir de
+caractere. Obiectele json le folosesc atunci cand dau comanda add_book
+(pentru a forma un string care sa respecte formatul json si pe care
+ulterior sa il trimit ca si POST request), cand dau comenzile get_book
+si get_books (pentru a manipula mesajul pe care il primesc spre a-l
+afisa intr-un format putin mai "human readable"), in enter_library
+folosesc json pentru a primi tokenul JWT, iar in register si login trimit
+mesaje de tipul json.
+
+Atunci cand trebuie sa pun tokenul JWT in cererile pe care doresc sa le
+fac si unde trebuie sa demonstrez ca am acces la librarie, aleg sa
+descompun string-ul pe care l-am obtinut din functiile care se afla in
+requests.cpp. Header-ul de Authorization il pun inainte de Host in cadrul
+cererii. Apoi, daca este cazul, concatenez sirul de caractere care imi
+reprezinta cererea cu cookie-ul care spune daca sunt logat.
+
+Cererea de DELETE o compun in acelasi mod ca si mesajele de tip GET
+si POST, de data aceasta nu folosesc o functie, ci compun in main
+mesajul.
+
+Conexiunea o redeschid la fiecare comanda valida pe care o dau.
+Mai am si doua variabile pe care le declar in main, loggedIn si
+enteredLibrary care imi spun daca cineva s-a logat sau are acces la
+bibloteca daca sunt 1, iar daca sunt setate pe 0 inseamna ca nu a facut
+acest lucru.
+
+Acum voi lua fiecare comanda pe rand si voi explica sumar in ce consta:
+
+-> register
+	Daca sunt deja logat cu cineva atunci nu pot inregistra un user nou
+	(fac aceasta verificare cu variabila loggedIn).
+	Apoi citesc username-ul si parola, deschid conexiunea, compun obiectul
+	json care le contine, compun mesajul pentru POST request (folosesc
+	functia compute_post_request). Apoi trimit mesajul si interpretez
+	raspunsul serverului.
+-> login
+	Verific daca sunt deja logat cu cineva, caz in care nu pot sa fac login.
+	Apoi citesc username-ul si parola, pornesc conexiunea si compun un mesaj
+	json care le contine pe care il trimit apoi la server (tot un POST request). Apoi, dupa ce primesc mesajul de la server, il interpretez. Daca primesc
+	cookie-ul de sesiune, atunci il retin intr-un sir de caractere in cadrul programului meu. Setez loggedIn pe 1.
+-> enter_library
+	Verific daca sunt logat (daca nu sunt atunci nu pot da aceasta comanda).
+	Deschid conexiunea, compun get requestul, il trimit la server, apoi preiau
+	raspunsul de la server, il interpretez, iar daca nu este eroare atunci
+	preiau tokenul care imi este trimis ca json si il stochez la fel ca si
+	cookie-ul de sesiune.
+-> get_books
+	Verific ca sunt logat si ca am acces la biblioteca. Daca am, atunci
+	deschid conexiunea, construiesc mesajul de tip GET. Ii adaug inainte de
+	Host header-ul de Authorization pe modelul precizat in enuntul temei (cu
+	"Bearer" in fata tokenului). Trimit la server, iar daca nu primesc eroare,
+	atunci preiau mesajul json, il parsez si incerc sa il afisez intr-un
+	format mai frumos (lista de carti).
+-> get_book
+	Get_book este similara cu comanda anterioara, doar ca trebuie sa citesc
+	id-ul si sa il concatenez la route. Inainte de asta verific daca sunt
+	conectat si am acces la biblioteca. Compun mesajul GET cu compute_get_request,
+	si adaug in interiorul lui acel header cu tokenul JWT (ca si la comanda
+	anterioara). Daca primesc un mesaj cu OK de la server, atunci preiau mesajul,
+	il fac json si printez frumos detaliile despre carte
+-> add_book
+	Verific daca am acces la biblioteca si daca sunt logat, citesc detaliile
+	cartii, deschid conexiunea, compun un mesaj json cu detaliile citite pe care
+	il trimit sub forma de post request la server. De asemena, adaug si header-ul
+	de authorization si interpretez apoi raspunsul de la server
+-> delete_book
+	Aici din nou verific daca sunt logat si am acces la librarie, citesc id-ul
+	pornesc conexiunea, compun ruta cu id-ul, iar apoi construiesc mesajul manual,
+	similar cu modul in care functiile compute_get_requests si
+	compute_post_requests si compute_get_requests fac. (doar ca de data aceasta
+	fac asta manual in main). Primesc mesajul de la server si daca este OK,
+	atunci interpretez mesajul de la server.
+-> logout
+	Verific daca sunt logat, altcumva nu am de unde sa ma delogez. Apoi trimit
+	GET requestul la server, primesc raspunsul si daca este OK, atunci resetez
+	cookie-ul si tokenul JWT, si pun pe 0 variabilele loggedIn si enteredLibrary.
+-> exit
+	La exit dau break.
+
+Per total, cred ca a fost o tema buna, explicatiile au fost ok. De asemenea,
+mi-a placut mult faptul ca ni s-a dat libertate in implementare spre a afisa
+mesajele cum ni se pare noua mai bine de cuvinta. Consider ca am avut de invatat
+din ea si ca realizarea ei m-a ajutat spre a-mi intari cunostiintele.
+
+Felicitari pentru tema si keep up the good work!
+
+Verna Dorian-Alexandru
+324CC
